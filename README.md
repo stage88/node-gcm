@@ -213,14 +213,14 @@ message.addNotification({
 
 Notice notification payload defined in [GCM Connection Server Reference](https://developers.google.com/cloud-messaging/server-ref#table1)
 
-## Custom HTTP request options
+## Custom axios HTTP request options
 
-You can provide custom `request` options such as `proxy` and `timeout` for the HTTP request to the GCM API. For more information, refer to [the complete list of request options](https://github.com/request/request#requestoptions-callback). Note that the following options cannot be overriden: `method`, `uri`, `body`, as well as the following headers: `Authorization`, `Content-Type`, and `Content-Length`.
+You can provide custom `axios` options such as `proxy` and `timeout` for the HTTP request to the GCM API. For more information, refer to [the complete list of request options](https://axios-http.com/docs/req_config). Note that the following options cannot be overriden: `method`, `url`, `data`, as well as the following headers: `Authorization`, `Content-Type`, and `Content-Length`.
 
 ```js
 // Set custom request options
 var requestOptions = {
-	proxy: 'http://127.0.0.1:8888',
+	proxy: { protocol: 'http', host: '127.0.0.1', port: 8888 },
 	timeout: 5000
 };
 

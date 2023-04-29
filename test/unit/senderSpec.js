@@ -6,16 +6,32 @@ var chai = require('chai'),
     proxyquire = require('proxyquire'),
     senderPath = '../../lib/sender',
     Constants = require('../../lib/constants'),
-    Message = require('../../lib/message');
+    Message = require('../../lib/message'),
+    http = require('http'),
+    https = require('https');
 
 describe('UNIT Sender', function () {
   // Use object to set arguments passed into callback
   var args = {};
-  var requestStub = function (options, callback) {
+  var requestStub = function (options) {
     args.options = options;
-    return callback( args.err, args.res, args.resBody );
+
+    if (args.err) {
+      return Promise.reject(args.err);
+    }
+
+    const res = {
+      status: args.res.statusCode,
+      statusText: args.res.statusMessage,
+      data: args.resBody,
+    }
+    if (args.res.statusCode != 200) {
+      return Promise.reject(res);
+    }
+
+    return Promise.resolve(res);
   };
-  var Sender = proxyquire(senderPath, { 'request': requestStub });
+  var Sender = proxyquire(senderPath, { 'axios': requestStub });
 
   describe('constructor', function () {
     var Sender = require(senderPath);
@@ -28,8 +44,9 @@ describe('UNIT Sender', function () {
 
     it('should create a Sender with key and options passed in', function () {
       var options = {
-        proxy: 'http://myproxy.com',
-        maxSockets: 100,
+        proxy: { protocol: 'http', host: 'myproxy.com' },
+        httpAgent: new http.Agent({ keepAlive: true, maxSockets: 100 }),
+        httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 100 }),
         timeout: 100
       };
       var key = 'myAPIKey',
@@ -54,21 +71,21 @@ describe('UNIT Sender', function () {
         setArgs(null, { statusCode: 200 }, {});
     });
 
-    it('should set proxy, maxSockets, timeout and/or strictSSL of req object if passed into constructor', function (done) {
+    it('should set proxy, http[s] agents, timeout of req object if passed into constructor', function (done) {
       var options = {
-        proxy: 'http://myproxy.com',
-        maxSockets: 100,
-        timeout: 1000,
-        strictSSL: false
+        proxy: { protocol: 'http', host: 'myproxy.com' },
+        httpAgent: new http.Agent({ keepAlive: true, maxSockets: 100 }),
+        httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 100 }),
+        timeout: 1000
       };
       var sender = new Sender('mykey', options);
       var m = new Message({ data: {} });
       sender.sendNoRetry(m, '', function () {});
       setTimeout(function() {
-        expect(args.options.proxy).to.equal(options.proxy);
-        expect(args.options.maxSockets).to.equal(options.maxSockets);
+        expect(args.options.proxy).to.eql(options.proxy);
+        expect(args.options.httpAgent.maxSockets).to.equal(options.httpAgent.maxSockets);
+        expect(args.options.httpsAgent.maxSockets).to.equal(options.httpsAgent.maxSockets);
         expect(args.options.timeout).to.equal(options.timeout);
-        expect(args.options.strictSSL).to.equal(options.strictSSL);
         done();
       }, 10);
     });
@@ -79,8 +96,8 @@ describe('UNIT Sender', function () {
         headers: {
             Authorization: 'test'
         },
-        uri: 'http://example.com',
-        json: { test: true }
+        url: 'http://example.com',
+        data: { test: true }
       };
       var sender = new Sender('mykey', options);
       var m = new Message({ data: {} });
@@ -88,8 +105,8 @@ describe('UNIT Sender', function () {
       setTimeout(function() {
         expect(args.options.method).to.not.equal(options.method);
         expect(args.options.headers).to.not.deep.equal(options.headers);
-        expect(args.options.uri).to.not.equal(options.uri);
-        expect(args.options.json).to.not.equal(options.json);
+        expect(args.options.url).to.not.equal(options.url);
+        expect(args.options.data).to.not.equal(options.data);
         done();
       }, 10);
     });
@@ -124,21 +141,6 @@ describe('UNIT Sender', function () {
       }, 10);
     });
 
-    it('should not set strictSSL of req object if not passed into constructor', function (done) {
-      var options = {
-        proxy: 'http://myproxy.com',
-        maxSockets: 100,
-        timeout: 1000
-      };
-      var sender = new Sender('mykey', options);
-      var m = new Message({ data: {} });
-      sender.sendNoRetry(m, '', function () {});
-      setTimeout(function() {
-        expect(args.options.strictSSL).to.be.an('undefined');
-        done();
-      }, 10);
-    });
-
     it('should set the API key of req object if passed in API key', function (done) {
       var sender = new Sender('myKey');
       var m = new Message({ data: {} });
@@ -154,7 +156,7 @@ describe('UNIT Sender', function () {
       var m = new Message({ collapseKey: 'Message', data: {} });
       sender.sendNoRetry(m, '', function () {});
       setTimeout(function() {
-        expect(args.options.json).to.be.a('object');
+        expect(args.options.data).to.be.a('object');
         done();
       }, 10);
     });
@@ -172,7 +174,7 @@ describe('UNIT Sender', function () {
       var sender = new Sender('mykey');
       sender.sendNoRetry(mess, '', function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body[Constants.PARAM_DELAY_WHILE_IDLE]).to.equal(mess.delayWhileIdle);
         expect(body[Constants.PARAM_COLLAPSE_KEY]).to.equal(mess.collapseKey);
         expect(body[Constants.PARAM_TIME_TO_LIVE]).to.equal(mess.timeToLive);
@@ -187,7 +189,7 @@ describe('UNIT Sender', function () {
       var m = new Message({ data: {} });
       sender.sendNoRetry(m, ["registration token 1", "registration token 2"], function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body.registration_ids).to.deep.equal(["registration token 1", "registration token 2"]);
         done();
       }, 10);
@@ -199,7 +201,7 @@ describe('UNIT Sender', function () {
       var regTokens = ["registration token 1", "registration token 2"];
       sender.sendNoRetry(m, { registrationIds: regTokens }, function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body.registration_ids).to.deep.equal(regTokens);
         done();
       }, 10);
@@ -211,7 +213,7 @@ describe('UNIT Sender', function () {
       var regTokens = ["registration token 1", "registration token 2"];
       sender.sendNoRetry(m, { registrationTokens: regTokens }, function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body.registration_ids).to.deep.equal(regTokens);
         done();
       }, 10);
@@ -222,7 +224,7 @@ describe('UNIT Sender', function () {
       var m = new Message({ data: {} });
       sender.sendNoRetry(m, "registration token 1", function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body.to).to.deep.equal("registration token 1");
         expect(body.registration_ids).to.be.an("undefined");
         done();
@@ -235,7 +237,7 @@ describe('UNIT Sender', function () {
       var token = "registration token 1";
       sender.sendNoRetry(m, token, function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body.to).to.deep.equal(token);
         expect(body.registration_ids).to.be.an("undefined");
         done();
@@ -248,7 +250,7 @@ describe('UNIT Sender', function () {
       var token = "registration token 1";
       sender.sendNoRetry(m, [ token ], function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body.to).to.deep.equal(token);
         expect(body.registration_ids).to.be.an("undefined");
         done();
@@ -261,7 +263,7 @@ describe('UNIT Sender', function () {
       var token = "registration token 1";
       sender.sendNoRetry(m, { registrationTokens: token }, function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body.to).to.deep.equal(token);
         expect(body.registration_ids).to.be.an("undefined");
         done();
@@ -274,7 +276,7 @@ describe('UNIT Sender', function () {
       var token = "registration token 1";
       sender.sendNoRetry(m, { registrationIDs: token }, function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body.to).to.deep.equal(token);
         expect(body.registration_ids).to.be.an("undefined");
         done();
@@ -287,7 +289,7 @@ describe('UNIT Sender', function () {
       var topic = '/topics/tests';
       sender.sendNoRetry(m, { topic: topic }, function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body.to).to.deep.equal(topic);
         expect(body.registration_ids).to.be.an("undefined");
         done();
@@ -300,7 +302,7 @@ describe('UNIT Sender', function () {
       var token = "registration token 1";
       sender.sendNoRetry(m, { to: token }, function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body.to).to.deep.equal(token);
         expect(body.registration_ids).to.be.an("undefined");
         done();
@@ -313,7 +315,7 @@ describe('UNIT Sender', function () {
       var topics = "'TopicA' in topics && ('TopicB' in topics || 'TopicC' in topics)";
       sender.sendNoRetry(m, { condition: topics }, function () {});
       setTimeout(function() {
-        var body = args.options.json;
+        var body = args.options.data;
         expect(body.condition).to.deep.equal(topics);
         expect(body.to).to.be.an("undefined");
         expect(body.registration_ids).to.be.an("undefined");
@@ -474,7 +476,7 @@ describe('UNIT Sender', function () {
       sender.sendNoRetry(m, '', callback);
       setTimeout(function() {
         expect(callback.calledOnce).to.be.ok;
-        expect(callback.args[0][0]).to.equal(500);
+        expect(callback.args[0][0].status).to.equal(500);
         done();
       }, 10);
     });
@@ -487,7 +489,7 @@ describe('UNIT Sender', function () {
       sender.sendNoRetry(m, '', callback);
       setTimeout(function() {
         expect(callback.calledOnce).to.be.ok;
-        expect(callback.args[0][0]).to.equal(401);
+        expect(callback.args[0][0].status).to.equal(401);
         done();
       }, 10);
     });
@@ -500,7 +502,7 @@ describe('UNIT Sender', function () {
       sender.sendNoRetry(m, '', callback);
       setTimeout(function() {
         expect(callback.calledOnce).to.be.ok;
-        expect(callback.args[0][0]).to.equal(400);
+        expect(callback.args[0][0].status).to.equal(400);
         done();
       }, 10);
     });
